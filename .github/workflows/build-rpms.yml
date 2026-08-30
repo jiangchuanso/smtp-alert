@@ -4,6 +4,11 @@ on:
   push:
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.0). Used as the RPM Version and Release tag when not triggered by a v* tag. Leave empty for a date-based nightly tag.'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -25,6 +30,8 @@ jobs:
           VERSION=""
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
           fi
           mkdir -p "$HOME/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           cp packaging/${{ matrix.pkg }}.spec "$HOME/rpmbuild/SPECS/"
@@ -41,7 +48,6 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -51,7 +57,22 @@ jobs:
           merge-multiple: true
           path: rpms
 
-      - name: Attach RPMs to GitHub Release
+      - name: Determine release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=nightly-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish RPMs to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: RPMs ${{ steps.tag.outputs.tag }}
           files: rpms/*.rpm
+          fail_on_unmatched_files: true
