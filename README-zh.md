@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="./README.md">English</a> · <b>中文</b>
+</p>
+
 # smtp-alert
 
 一组纯 shell 编写的 Linux 监控 / 保活脚本。出问题时通过 `curl` 直连 SMTP 服务器
