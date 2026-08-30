@@ -1,3 +1,7 @@
+<p align="center">
+  <b>English</b> · <a href="./README-zh.md">中文</a>
+</p>
+
 # smtp-alert
 
 A collection of pure-shell Linux monitoring / keepalive scripts that send SMTP alert
