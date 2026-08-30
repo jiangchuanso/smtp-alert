@@ -35,7 +35,7 @@ jobs:
           fi
           mkdir -p "$HOME/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           cp packaging/${{ matrix.pkg }}.spec "$HOME/rpmbuild/SPECS/"
-          ARGS=(--define "_topdir $HOME/rpmbuild" --define "_sourcedir $PWD")
+          ARGS=(--define "_topdir $HOME/rpmbuild" --define "_sourcedir $PWD/${{ matrix.pkg }}")
           [ -n "$VERSION" ] && ARGS+=(--define "_version $VERSION")
           rpmbuild -bb "${ARGS[@]}" "$HOME/rpmbuild/SPECS/${{ matrix.pkg }}.spec"
 
