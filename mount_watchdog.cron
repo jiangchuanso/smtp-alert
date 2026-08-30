@@ -1,0 +1,5 @@
+# /etc/cron.d/mount_watchdog - SMB/NFS 挂载保活，每 2 分钟
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/2 * * * * root /opt/scripts/mount_watchdog.sh >> /var/log/mount_watchdog.log 2>&1

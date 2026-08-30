@@ -1,0 +1,5 @@
+# /etc/cron.d/disk_monitor - 磁盘空间监控，每 10 分钟
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/10 * * * * root /opt/scripts/disk_monitor.sh >> /var/log/disk_monitor.log 2>&1

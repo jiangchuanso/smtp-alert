@@ -1,0 +1,111 @@
+#!/bin/bash
+# disk_monitor.sh - 监控分区空间使用率，超阈值时通过 curl + SMTP 发送告警邮件
+# 用法: ./disk_monitor.sh [阈值]
+
+# ==================== 配置区 ====================
+THRESHOLD="${1:-80}"
+
+SMTP_HOST="smtp.example.com"
+SMTP_PORT="25"
+SMTP_USER="alert@example.com"
+SMTP_PASS="your-password"
+SMTP_FROM="alert@example.com"
+SMTP_TO="admin@example.com"
+
+if [ "$SMTP_PORT" = "465" ]; then
+    SMTP_URL="smtps://${SMTP_HOST}:${SMTP_PORT}"
+    SSL_ARGS="--ssl-reqd"
+elif [ "$SMTP_PORT" = "587" ]; then
+    SMTP_URL="smtp://${SMTP_HOST}:${SMTP_PORT}"
+    SSL_ARGS="--ssl-reqd"
+else
+    SMTP_URL="smtp://${SMTP_HOST}:${SMTP_PORT}"
+    SSL_ARGS=""
+fi
+
+EXCLUDE_REGEX='^(tmpfs|devtmpfs|overlay|squashfs|iso9660|udev)$'
+STATE_FILE="/tmp/disk_monitor_alert.state"
+# ================================================
+
+MAIL_DATE=$(date '+%a, %d %b %Y %H:%M:%S %z')
+HOSTNAME=$(hostname)
+
+ALERTS=$(df -P -x tmpfs -x devtmpfs 2>/dev/null | awk -v th="$THRESHOLD" '
+    NR>1 && $1 !~ /^\/dev\/loop/ {
+        usage=int($5); mount=$6
+        if (usage >= th) print $1, mount, usage
+    }')
+
+if [ -n "$ALERTS" ]; then
+    FILTERED=""
+    while IFS=' ' read -r fs mount usage; do
+        fstype=$(stat -f -c %T "$mount" 2>/dev/null)
+        echo "$fstype" | grep -Eq "$EXCLUDE_REGEX" && continue
+        FILTERED+="${fs} ${mount} ${usage}"$'\n'
+    done <<< "$ALERTS"
+    ALERTS="$FILTERED"
+fi
+
+if [ -z "$ALERTS" ]; then
+    [ -f "$STATE_FILE" ] && rm -f "$STATE_FILE" && \
+        echo "$(date '+%F %T') 所有分区已恢复至阈值以下，清除告警状态"
+    exit 0
+fi
+
+ALERT_HASH=$(echo "$ALERTS" | sort | md5sum | cut -d' ' -f1)
+if [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE")" = "$ALERT_HASH" ]; then
+    echo "$(date '+%F %T') 告警内容未变化，跳过发送"
+    exit 0
+fi
+
+BODY="主机 ${HOSTNAME} 磁盘空间告警
+
+以下分区使用率已超过 ${THRESHOLD}%：
+
+文件系统        挂载点          使用率
+----------------------------------------
+$(echo "$ALERTS" | awk '{printf "%-16s %-16s %s%%\n", $1, $2, $3}')
+
+请及时清理磁盘空间。
+--
+disk_monitor @ ${HOSTNAME}
+$(date '+%F %T')"
+
+SUBJ_B64=$(echo "【告警】${HOSTNAME} 磁盘空间不足" | base64 -w0)
+BODY_B64=$(echo "$BODY" | base64 -w0)
+
+MAIL_FILE=$(mktemp)
+{
+    echo "From: <${SMTP_FROM}>"
+    echo "To: <${SMTP_TO}>"
+    echo "Subject: =?UTF-8?B?${SUBJ_B64}?="
+    echo "Date: ${MAIL_DATE}"
+    echo "MIME-Version: 1.0"
+    echo "Content-Type: text/plain; charset=UTF-8"
+    echo "Content-Transfer-Encoding: base64"
+    echo ""
+    echo "$BODY_B64" | fold -w 76
+} > "$MAIL_FILE"
+
+RCPT_ARGS=""
+IFS=',' read -ra RCPTS <<< "$SMTP_TO"
+for rcpt in "${RCPTS[@]}"; do
+    RCPT_ARGS+=" --mail-rcpt <$rcpt>"
+done
+
+curl -sS --url "$SMTP_URL" $SSL_ARGS \
+    --user "${SMTP_USER}:${SMTP_PASS}" \
+    --mail-from "<${SMTP_FROM}>" \
+    $RCPT_ARGS \
+    --upload-file "$MAIL_FILE" \
+    --max-time 60 \
+    --connect-timeout 15
+
+if [ $? -eq 0 ]; then
+    echo "$ALERT_HASH" > "$STATE_FILE"
+    echo "$(date '+%F %T') 告警邮件已发送: $ALERTS"
+else
+    echo "$(date '+%F %T') 邮件发送失败!" >&2
+fi
+
+rm -f "$MAIL_FILE"

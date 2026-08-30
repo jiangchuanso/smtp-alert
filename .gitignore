@@ -1,0 +1,6 @@
+# Ignore all hidden files and directories (names starting with '.')
+.*
+# Keep the Git ignore rules themselves
+!.gitignore
+# Keep GitHub Actions workflows
+!.github

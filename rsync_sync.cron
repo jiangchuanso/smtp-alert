@@ -1,0 +1,5 @@
+# /etc/cron.d/rsync_sync - rsync 数据同步，每 30 分钟
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/30 * * * * root /opt/scripts/rsync_sync.sh >> /var/log/rsync_sync.log 2>&1
