@@ -6,7 +6,7 @@ BuildArch:      noarch
 License:        MIT
 Source0:        rsync_sync.sh
 Source1:        rsync_sync.cron
-Requires:       bash, curl, rsync, coreutils
+Requires:       bash, curl, rsync, coreutils, util-linux
 AutoReqProv:    no
 
 %description
