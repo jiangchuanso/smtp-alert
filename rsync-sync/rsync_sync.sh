@@ -38,9 +38,6 @@ else
     SSL_ARGS=""
 fi
 
-AUTH_ARGS=""
-[ -n "$SMTP_USER" ] && AUTH_ARGS="--user ${SMTP_USER}:${SMTP_PASS}"
-
 send_mail() {
     local subj="$1" body="$2"
     local subj_b64 body_b64 mail_file
@@ -51,7 +48,8 @@ send_mail() {
         echo "From: <${SMTP_FROM}>"
         echo "To: <${SMTP_TO}>"
         echo "Subject: =?UTF-8?B?${subj_b64}?="
-        echo "Date: $(date '+%a, %d %b %Y %H:%M:%S %z')"
+        # RFC 5322 Date 头必须是英文星期/月份，强制 C locale
+        echo "Date: $(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')"
         echo "MIME-Version: 1.0"
         echo "Content-Type: text/plain; charset=UTF-8"
         echo "Content-Transfer-Encoding: base64"
@@ -59,16 +57,18 @@ send_mail() {
         echo "$body_b64" | fold -w 76
     } > "$mail_file"
 
-    local rcpt_args=""
+    # 数组展开传参，密码/收件人含空格也不会被拆词
+    local curl_args=(--url "$SMTP_URL")
+    [ -n "$SSL_ARGS" ] && curl_args+=(--ssl-reqd)
+    [ -n "$SMTP_USER" ] && curl_args+=(--user "${SMTP_USER}:${SMTP_PASS}")
+    curl_args+=(--mail-from "<${SMTP_FROM}>")
     local IFS=','
     read -ra RCPTS <<< "$SMTP_TO"
     for rcpt in "${RCPTS[@]}"; do
-        rcpt_args+=" --mail-rcpt <$rcpt>"
+        curl_args+=(--mail-rcpt "${rcpt// /}")
     done
 
-    curl -sS --url "$SMTP_URL" $SSL_ARGS $AUTH_ARGS \
-        --mail-from "<${SMTP_FROM}>" \
-        $rcpt_args \
+    curl -sS "${curl_args[@]}" \
         --upload-file "$mail_file" \
         --max-time 60 \
         --connect-timeout 15
@@ -77,12 +77,13 @@ send_mail() {
     return $rc
 }
 
+# flock 防止并发；旧版 mkdir 锁在进程被 kill -9 后会留下死锁目录，导致后续全部跳过
 LOCK_FILE="/tmp/rsync_sync.lock"
-if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+exec 200>"$LOCK_FILE" 2>/dev/null || { echo "$(date '+%F %T') 无法创建锁文件: $LOCK_FILE" >&2; exit 1; }
+if ! flock -n 200; then
     echo "$(date '+%F %T') 上一次同步仍在执行，跳过"
     exit 0
 fi
-trap 'rmdir "$LOCK_FILE" 2>/dev/null' EXIT
 
 [ -d "$SRC_DIR" ] || { echo "$(date '+%F %T') 源目录不存在: $SRC_DIR" >&2; exit 1; }
 
@@ -90,13 +91,15 @@ LOG_FILE=$(mktemp)
 echo "$(date '+%F %T') 开始同步: ${SRC_DIR} -> ${DST_DIR}"
 
 attempt=1
+# RETRY 为"重试次数"，总尝试次数 = RETRY + 1（首次 + N 次重试）
+MAX_ATTEMPTS=$((RETRY+1))
 while :; do
     rsync $RSYNC_OPTS "$SRC_DIR" "$DST_DIR" > "$LOG_FILE" 2>&1
     rc=$?
     [ $rc -eq 0 ] && break
-    [ $attempt -ge $RETRY ] && break
+    [ $attempt -ge $MAX_ATTEMPTS ] && break
     attempt=$((attempt+1))
-    echo "$(date '+%F %T') 第 $((attempt-1)) 次同步失败，${RETRY_INTERVAL}s 后重试"
+    echo "$(date '+%F %T') 第 $((attempt-1)) 次同步失败，${RETRY_INTERVAL}s 后重试($attempt/$MAX_ATTEMPTS)"
     sleep "$RETRY_INTERVAL"
 done
 

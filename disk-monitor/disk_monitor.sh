@@ -27,7 +27,8 @@ EXCLUDE_REGEX='^(tmpfs|devtmpfs|overlay|squashfs|iso9660|udev)$'
 STATE_FILE="/tmp/disk_monitor_alert.state"
 # ================================================
 
-MAIL_DATE=$(date '+%a, %d %b %Y %H:%M:%S %z')
+# RFC 5322 Date 头必须是英文星期/月份，强制 C locale 防止中文 locale 下生成非法头
+MAIL_DATE=$(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')
 HOSTNAME=$(hostname)
 
 ALERTS=$(df -P -x tmpfs -x devtmpfs 2>/dev/null | awk -v th="$THRESHOLD" '
@@ -87,21 +88,19 @@ MAIL_FILE=$(mktemp)
     echo "$BODY_B64" | fold -w 76
 } > "$MAIL_FILE"
 
-RCPT_ARGS=""
+CURL_ARGS=(--url "$SMTP_URL")
+[ -n "$SSL_ARGS" ] && CURL_ARGS+=(--ssl-reqd)
+CURL_ARGS+=(--user "${SMTP_USER}:${SMTP_PASS}" --mail-from "<${SMTP_FROM}>")
 IFS=',' read -ra RCPTS <<< "$SMTP_TO"
 for rcpt in "${RCPTS[@]}"; do
-    RCPT_ARGS+=" --mail-rcpt <$rcpt>"
+    CURL_ARGS+=(--mail-rcpt "${rcpt// /}")
 done
 
-curl -sS --url "$SMTP_URL" $SSL_ARGS \
-    --user "${SMTP_USER}:${SMTP_PASS}" \
-    --mail-from "<${SMTP_FROM}>" \
-    $RCPT_ARGS \
+# 数组展开传参，密码/收件人含空格也不会被拆词
+if curl -sS "${CURL_ARGS[@]}" \
     --upload-file "$MAIL_FILE" \
     --max-time 60 \
-    --connect-timeout 15
-
-if [ $? -eq 0 ]; then
+    --connect-timeout 15; then
     echo "$ALERT_HASH" > "$STATE_FILE"
     echo "$(date '+%F %T') 告警邮件已发送: $ALERTS"
 else
