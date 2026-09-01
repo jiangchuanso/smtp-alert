@@ -6,7 +6,7 @@ BuildArch:      noarch
 License:        MIT
 Source0:        disk_monitor.sh
 Source1:        disk_monitor.cron
-Requires:       bash, curl, coreutils, gawk, grep
+Requires:       bash, curl, coreutils, gawk, grep, sed
 AutoReqProv:    no
 
 %description
