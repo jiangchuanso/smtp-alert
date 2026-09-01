@@ -7,8 +7,8 @@ THRESHOLD="${1:-80}"
 
 SMTP_HOST="smtp.example.com"
 SMTP_PORT="25"
-SMTP_USER="alert@example.com"
-SMTP_PASS="your-password"
+SMTP_USER=""
+SMTP_PASS=""
 SMTP_FROM="alert@example.com"
 SMTP_TO="admin@example.com"
 
@@ -27,8 +27,6 @@ EXCLUDE_REGEX='^(tmpfs|devtmpfs|overlay|squashfs|iso9660|udev)$'
 STATE_FILE="/tmp/disk_monitor_alert.state"
 # ================================================
 
-# RFC 5322 Date 头必须是英文星期/月份，强制 C locale 防止中文 locale 下生成非法头
-MAIL_DATE=$(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')
 HOSTNAME=$(hostname)
 
 ALERTS=$(df -P -x tmpfs -x devtmpfs 2>/dev/null | awk -v th="$THRESHOLD" '
@@ -72,39 +70,45 @@ $(echo "$ALERTS" | awk '{printf "%-16s %-16s %s%%\n", $1, $2, $3}')
 disk_monitor @ ${HOSTNAME}
 $(date '+%F %T')"
 
-SUBJ_B64=$(echo "【告警】${HOSTNAME} 磁盘空间不足" | base64 -w0)
-BODY_B64=$(echo "$BODY" | base64 -w0)
+# 与已验证成功的 smart_curl_mail 插件保持一致：
+# 正文用 8bit 原文，Date 头用 date -R，curl 的 FROM/RCPT 不带尖括号
+SUBJ_B64=$(printf '%s' "【告警】${HOSTNAME} 磁盘空间不足" | base64 -w0)
 
 MAIL_FILE=$(mktemp)
 {
-    echo "From: <${SMTP_FROM}>"
-    echo "To: <${SMTP_TO}>"
-    echo "Subject: =?UTF-8?B?${SUBJ_B64}?="
-    echo "Date: ${MAIL_DATE}"
-    echo "MIME-Version: 1.0"
-    echo "Content-Type: text/plain; charset=UTF-8"
-    echo "Content-Transfer-Encoding: base64"
-    echo ""
-    echo "$BODY_B64" | fold -w 76
+    printf 'From: <%s>\n' "$SMTP_FROM"
+    printf 'To: <%s>\n' "$SMTP_TO"
+    printf 'Subject: =?UTF-8?B?%s?=\n' "$SUBJ_B64"
+    printf 'Date: %s\n' "$(LC_ALL=C date -R)"
+    printf 'MIME-Version: 1.0\n'
+    printf 'Content-Type: text/plain; charset=UTF-8\n'
+    printf 'Content-Transfer-Encoding: 8bit\n'
+    printf '\n'
+    printf '%s\n' "$BODY"
 } > "$MAIL_FILE"
+# SMTP 要求 CRLF 行尾，curl 不做转换，统一转成 CRLF
+sed -i 's/$/\r/' "$MAIL_FILE"
 
 CURL_ARGS=(--url "$SMTP_URL")
 [ -n "$SSL_ARGS" ] && CURL_ARGS+=(--ssl-reqd)
-CURL_ARGS+=(--user "${SMTP_USER}:${SMTP_PASS}" --mail-from "<${SMTP_FROM}>")
+# 免认证模式下不加 --user，避免 curl 空凭证触发 AUTH 协商导致部分服务器断连
+[ -n "$SMTP_USER" ] && CURL_ARGS+=(--user "${SMTP_USER}:${SMTP_PASS}")
+CURL_ARGS+=(--mail-from "$SMTP_FROM")
 IFS=',' read -ra RCPTS <<< "$SMTP_TO"
 for rcpt in "${RCPTS[@]}"; do
     CURL_ARGS+=(--mail-rcpt "${rcpt// /}")
 done
 
 # 数组展开传参，密码/收件人含空格也不会被拆词
-if curl -sS "${CURL_ARGS[@]}" \
+CURL_ERR=$(curl -sS "${CURL_ARGS[@]}" \
     --upload-file "$MAIL_FILE" \
     --max-time 60 \
-    --connect-timeout 15; then
+    --connect-timeout 15 2>&1)
+if [ $? -eq 0 ]; then
     echo "$ALERT_HASH" > "$STATE_FILE"
     echo "$(date '+%F %T') 告警邮件已发送: $ALERTS"
 else
-    echo "$(date '+%F %T') 邮件发送失败!" >&2
+    echo "$(date '+%F %T') 邮件发送失败: ${CURL_ERR:-未知错误}" >&2
 fi
 
 rm -f "$MAIL_FILE"

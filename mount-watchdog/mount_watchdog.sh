@@ -15,8 +15,8 @@ FAIL_THRESHOLD=2
 ALERT_ON_FAIL=true
 SMTP_HOST="smtp.example.com"
 SMTP_PORT="25"
-SMTP_USER="alert@example.com"
-SMTP_PASS="your-password"
+SMTP_USER=""
+SMTP_PASS=""
 SMTP_FROM="alert@example.com"
 SMTP_TO="admin@example.com"
 # ================================================
@@ -37,26 +37,28 @@ else
 fi
 
 send_mail() {
-    local subj_b64 body_b64 mail_file rc
-    subj_b64=$(echo "$1" | base64 -w0)
-    body_b64=$(echo "$2" | base64 -w0)
+    local subj_b64 mail_file rc
+    subj_b64=$(printf '%s' "$1" | base64 -w0)
     mail_file=$(mktemp)
+    # 与已验证成功的 smart_curl_mail 插件保持一致：正文 8bit 原文、date -R、无尖括号
     {
-        echo "From: <${SMTP_FROM}>"
-        echo "To: <${SMTP_TO}>"
-        echo "Subject: =?UTF-8?B?${subj_b64}?="
-        # RFC 5322 Date 头必须是英文星期/月份，强制 C locale
-        echo "Date: $(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')"
-        echo "MIME-Version: 1.0"
-        echo "Content-Type: text/plain; charset=UTF-8"
-        echo "Content-Transfer-Encoding: base64"
-        echo ""
-        echo "$body_b64" | fold -w 76
+        printf 'From: <%s>\n' "$SMTP_FROM"
+        printf 'To: <%s>\n' "$SMTP_TO"
+        printf 'Subject: =?UTF-8?B?%s?=\n' "$subj_b64"
+        printf 'Date: %s\n' "$(LC_ALL=C date -R)"
+        printf 'MIME-Version: 1.0\n'
+        printf 'Content-Type: text/plain; charset=UTF-8\n'
+        printf 'Content-Transfer-Encoding: 8bit\n'
+        printf '\n'
+        printf '%s\n' "$2"
     } > "$mail_file"
-    # 数组展开传参，密码/收件人含空格也不会被拆词
+    # SMTP 要求 CRLF 行尾，curl 不做转换，统一转成 CRLF
+    sed -i 's/$/\r/' "$mail_file"
+    # 免认证模式下不加 --user，避免 curl 空凭证触发 AUTH 协商导致部分服务器断连
     local curl_args=(--url "$SMTP_URL")
     [ -n "$SSL_ARGS" ] && curl_args+=(--ssl-reqd)
-    curl_args+=(--user "${SMTP_USER}:${SMTP_PASS}" --mail-from "<${SMTP_FROM}>")
+    [ -n "$SMTP_USER" ] && curl_args+=(--user "${SMTP_USER}:${SMTP_PASS}")
+    curl_args+=(--mail-from "$SMTP_FROM")
     local IFS=','
     read -ra RCPTS <<< "$SMTP_TO"
     for rcpt in "${RCPTS[@]}"; do

@@ -6,7 +6,7 @@ BuildArch:      noarch
 License:        MIT
 Source0:        mount_watchdog.sh
 Source1:        mount_watchdog.cron
-Requires:       bash, curl, coreutils, util-linux
+Requires:       bash, curl, coreutils, util-linux, sed
 AutoReqProv:    no
 
 %description
