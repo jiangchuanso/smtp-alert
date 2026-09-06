@@ -1,6 +1,42 @@
-# Ignore all hidden files and directories (names starting with '.')
+# ===== 以 . 开头的非必要文件 / 文件夹（必要项除外） =====
 .*
-# Keep the Git ignore rules themselves
 !.gitignore
-# Keep GitHub Actions workflows
-!.github
+!.gitattributes
+!.github/
+!.dockerignore
+!.env.example
+
+# ===== 测试 / 覆盖率产物 =====
+coverage/
+htmlcov/
+test-results/
+playwright-report/
+cypress/screenshots/
+cypress/videos/
+
+# ===== 构建产物 =====
+build/
+dist/
+target/
+out/
+bin/
+*.tsbuildinfo
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+
+# ===== Node =====
+node_modules/
+
+# ===== 日志 =====
+*.log
+logs/
+
+# ===== 操作系统 =====
+Thumbs.db
+ehthumbs.db
